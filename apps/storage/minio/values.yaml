@@ -1,0 +1,53 @@
+minio:
+  mode: distributed
+  statefulset:
+    replicaCount: 4
+
+  auth:
+    rootUser: "admin"
+    existingSecret: minio-root-secret
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hostname: minio.kiruz.com
+    tls: true
+
+  apiIngress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"  # unlimited for uploads
+    hostname: s3.kiruz.com
+    tls: true
+
+  persistence:
+    enabled: true
+    storageClass: longhorn
+    size: 500Gi
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+  # Pre-create buckets
+  defaultBuckets: "saleor-media,saleor-static,loki-chunks,pg-backups,gitlab-lfs,gitlab-artifacts,gitlab-uploads,gitlab-packages,gitlab-backups"
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: monitoring
+
+  # Server-side encryption
+  tls:
+    enabled: false   # TLS terminated at ingress
+
+  # Lifecycle policies configured post-deploy via mc client

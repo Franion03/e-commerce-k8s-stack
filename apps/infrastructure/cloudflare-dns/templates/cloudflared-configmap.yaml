@@ -1,0 +1,52 @@
+{{- if .Values.cloudflared.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: infrastructure
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: tunnel
+    app.kubernetes.io/managed-by: Helm
+data:
+  config.yaml: |
+    # ── Tunnel identity ──────────────────────────────────────────────
+    # The tunnel UUID is embedded in the credentials JSON; cloudflared
+    # reads it from there automatically when credentials-file is set.
+    tunnel: {{ .Values.cloudflared.tunnelName | quote }}
+    credentials-file: /etc/cloudflared/credentials.json
+
+    # ── Metrics endpoint ─────────────────────────────────────────────
+    metrics: 0.0.0.0:{{ .Values.cloudflared.metrics.port }}
+
+    # ── WARP private network routing ────────────────────────────────
+    # Enables Cloudflare WARP clients to reach the CIDRs listed in
+    # .Values.cloudflared.privateNetworks via this tunnel connector.
+    # Matching split-routes must also be configured at:
+    #   Zero Trust → Networks → Routes → Add route
+    warp-routing:
+      enabled: true
+
+    # ── Public hostname ingress rules ────────────────────────────────
+    # cloudflared evaluates rules top-to-bottom; the wildcard catch-all
+    # must always be last.
+    ingress:
+      {{- range .Values.cloudflared.ingress }}
+      - hostname: {{ .hostname | quote }}
+        service: {{ .service | quote }}
+        {{- if .originRequest }}
+        originRequest:
+          {{- if hasKey .originRequest "noTLSVerify" }}
+          noTLSVerify: {{ .originRequest.noTLSVerify }}
+          {{- end }}
+          {{- if .originRequest.caPool }}
+          caPool: {{ .originRequest.caPool | quote }}
+          {{- end }}
+          {{- if .originRequest.http2Origin }}
+          http2Origin: {{ .originRequest.http2Origin }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      # Catch-all: return 404 for any hostname not matched above.
+      - service: http_status:404
+{{- end }}

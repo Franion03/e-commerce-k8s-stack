@@ -1,0 +1,52 @@
+{{- if and .Values.cloudflared.enabled .Values.cloudflared.metrics.enabled }}
+# ── Service — cloudflared metrics ────────────────────────────────
+# Headless-style ClusterIP so Prometheus can scrape each pod's
+# /metrics endpoint independently via the ServiceMonitor.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared-metrics
+  namespace: infrastructure
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/managed-by: Helm
+spec:
+  selector:
+    app.kubernetes.io/name: cloudflared
+  ports:
+    - name: metrics
+      port: {{ .Values.cloudflared.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+  clusterIP: None   # headless — Prometheus scrapes each pod IP
+
+---
+# ── ServiceMonitor — Prometheus integration ──────────────────────
+# Picked up by the kube-prometheus-stack's serviceMonitorSelector
+# (any ServiceMonitor across all namespaces is discovered).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cloudflared
+  namespace: infrastructure
+  labels:
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: metrics
+    app.kubernetes.io/managed-by: Helm
+    # Label required by the prometheus-stack serviceMonitorSelector
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+      app.kubernetes.io/component: metrics
+  namespaceSelector:
+    matchNames:
+      - infrastructure
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+{{- end }}

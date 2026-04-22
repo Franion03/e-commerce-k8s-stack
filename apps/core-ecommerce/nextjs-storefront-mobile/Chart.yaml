@@ -1,0 +1,9 @@
+apiVersion: v2
+name: nextjs-storefront-mobile
+description: Saleor Next.js Storefront — mobile-optimised build (routed by HAProxy User-Agent ACL)
+type: application
+version: 1.0.0
+appVersion: "3.20"
+maintainers:
+  - name: platform-team
+    email: platform@kiruz.com

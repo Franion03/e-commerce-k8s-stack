@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "saleor.fullname" . }}-config
+  namespace: core-ecommerce
+  labels:
+    {{- include "saleor.labels" . | nindent 4 }}
+data:
+  DEBUG: {{ .Values.env.DEBUG | quote }}
+  ALLOWED_HOSTS: {{ .Values.env.ALLOWED_HOSTS | quote }}
+  ALLOWED_CLIENT_HOSTS: {{ .Values.env.ALLOWED_CLIENT_HOSTS | quote }}
+  DEFAULT_FROM_EMAIL: {{ .Values.env.DEFAULT_FROM_EMAIL | quote }}
+  CELERY_BROKER_URL: {{ .Values.env.CELERY_BROKER_URL | quote }}
+  AWS_MEDIA_BUCKET_NAME: {{ .Values.env.AWS_MEDIA_BUCKET_NAME | quote }}
+  AWS_STORAGE_BUCKET_NAME: {{ .Values.env.AWS_STORAGE_BUCKET_NAME | quote }}
+  AWS_S3_ENDPOINT_URL: {{ .Values.env.AWS_S3_ENDPOINT_URL | quote }}
+  OIDC_CLIENT_ID: {{ .Values.env.OIDC_CLIENT_ID | quote }}
+  OIDC_WELL_KNOWN_URL: {{ .Values.env.OIDC_WELL_KNOWN_URL | quote }}
+  # Telemetry endpoint
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo.monitoring.svc.cluster.local:4318"
+  OTEL_SERVICE_NAME: "saleor"

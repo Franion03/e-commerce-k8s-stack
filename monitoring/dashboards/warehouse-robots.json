@@ -1,0 +1,117 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" },
+    { "name": "DS_INFLUXDB",   "label": "InfluxDB",   "type": "datasource", "pluginId": "influxdb" }
+  ],
+  "title": "Warehouse Robots Dashboard",
+  "uid":   "kiruz-warehouse",
+  "tags":  ["kiruz", "warehouse", "robots"],
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active Robots",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "count(robot_last_heartbeat_timestamp_seconds > (time() - 60))",
+        "legendFormat": "Online Robots"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "steps": [{"value": 0, "color": "red"}, {"value": 1, "color": "green"}] } } }
+    },
+    {
+      "id": 2,
+      "title": "Offline Robots",
+      "type": "stat",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "count(robot_last_heartbeat_timestamp_seconds < (time() - 120))",
+        "legendFormat": "Offline"
+      }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [{"value": 0, "color": "green"}, {"value": 1, "color": "red"}] } } }
+    },
+    {
+      "id": 3,
+      "title": "Task Completion Rate",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "rate(amr_tasks_completed_total[10m]) / rate(amr_tasks_total[10m]) * 100",
+        "legendFormat": "Success %"
+      }],
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [{"value": 0, "color": "red"}, {"value": 90, "color": "yellow"}, {"value": 98, "color": "green"}] } } }
+    },
+    {
+      "id": 4,
+      "title": "Avg Robot Battery (%)",
+      "type": "gauge",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "avg(robot_battery_percentage)",
+        "legendFormat": "Avg Battery"
+      }],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "thresholds": { "steps": [{"value": 0, "color": "red"}, {"value": 20, "color": "yellow"}, {"value": 50, "color": "green"}] } } }
+    },
+    {
+      "id": 5,
+      "title": "MQTT Messages/s",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "rate(mosquitto_messages_received_total[1m])",
+        "legendFormat": "MQTT msg/s"
+      }]
+    },
+    {
+      "id": 6,
+      "title": "Robot Status Map",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "robot_status_value",
+        "legendFormat": "{{ robot_id }} ({{ zone }})"
+      }]
+    },
+    {
+      "id": 7,
+      "title": "Robot Speed (m/s) by Unit",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": "${DS_INFLUXDB}",
+      "targets": [{
+        "query": "from(bucket: \"robots\") |> range(start: -30m) |> filter(fn: (r) => r._measurement == \"telemetry\" and r._field == \"speed\") |> aggregateWindow(every: 10s, fn: mean)",
+        "legendFormat": "{{ robot_id }}"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "Tasks Queued vs Completed",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        { "expr": "amr_tasks_queued", "legendFormat": "Queued" },
+        { "expr": "rate(amr_tasks_completed_total[5m]) * 300", "legendFormat": "Completed /5m" },
+        { "expr": "rate(amr_task_failures_total[5m]) * 300", "legendFormat": "Failed /5m" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Zone Activity Heatmap",
+      "type": "heatmap",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 6 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{
+        "expr": "sum(rate(amr_tasks_completed_total[5m])) by (zone)",
+        "legendFormat": "{{ zone }}"
+      }]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+replicaCount: 1
+
+image:
+  repository: vaultwarden/server
+  tag: "1.32-alpine"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+  websocketPort: 3012
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: vault.kiruz.com
+      paths:
+        - path: /
+          pathType: Prefix
+        - path: /notifications/hub
+          pathType: Prefix
+          servicePort: 3012
+  tls:
+    - secretName: vaultwarden-tls
+      hosts:
+        - vault.kiruz.com
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+env:
+  DOMAIN: "https://vault.kiruz.com"
+  WEBSOCKET_ENABLED: "true"
+  SIGNUPS_ALLOWED: "false"   # closed registration
+  INVITATIONS_ALLOWED: "true"
+  ADMIN_TOKEN: ""            # injected via ExternalSecret
+  SMTP_HOST: "mailcow.marketing.svc.cluster.local"
+  SMTP_PORT: "587"
+  SMTP_FROM: "vault@kiruz.com"
+  LOG_LEVEL: "warn"
+
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 5Gi
+  accessMode: ReadWriteOnce
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]

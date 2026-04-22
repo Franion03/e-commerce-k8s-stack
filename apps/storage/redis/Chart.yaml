@@ -1,0 +1,10 @@
+apiVersion: v2
+name: redis
+description: Redis cluster for caching, sessions, and queues
+type: application
+version: 1.0.0
+appVersion: "7.2"
+dependencies:
+  - name: redis
+    version: "19.6.4"
+    repository: "https://charts.bitnami.com/bitnami"

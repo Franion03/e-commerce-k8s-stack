@@ -1,0 +1,35 @@
+image:
+  repository: osixia/keepalived
+  tag: "2.0.20"
+  pullPolicy: IfNotPresent
+
+# Runs as DaemonSet on designated LB nodes
+daemonSet:
+  enabled: true
+  nodeSelector:
+    node-role: "load-balancer"
+
+env:
+  KEEPALIVED_INTERFACE: "eth0"
+  KEEPALIVED_VIRTUAL_IPS: "192.168.1.100"   # VIP for HAProxy
+  KEEPALIVED_UNICAST_PEERS: ""               # auto-discover via K8s API
+  KEEPALIVED_PASSWORD: ""                    # injected via ExternalSecret
+  KEEPALIVED_PRIORITY: "150"                 # master=150, backup=100
+
+securityContext:
+  privileged: true
+  capabilities:
+    add:
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+
+hostNetwork: true
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi

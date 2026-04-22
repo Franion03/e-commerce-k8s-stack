@@ -1,0 +1,75 @@
+replicaCount: 1  # Odoo typically single-instance; HA via PG Patroni
+
+image:
+  repository: odoo
+  tag: "17.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8069
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  hosts:
+    - host: erp.kiruz.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: odoo-tls
+      hosts:
+        - erp.kiruz.com
+
+resources:
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+  limits:
+    cpu: "4"
+    memory: 4Gi
+
+# Odoo addons for WMS + robot integration
+addons:
+  - stock
+  - stock_picking_batch
+  - delivery
+  - mrp
+  - mrp_workcenter
+  - sale_management
+  - purchase
+  - account
+  - l10n_es              # Spanish localization
+  - website
+  - website_sale
+
+env:
+  HOST: "postgresql-primary.storage.svc.cluster.local"
+  PORT: "5432"
+  USER: "odoo"
+  ODOO_RC: "/etc/odoo/odoo.conf"
+
+# Robot integration settings
+robotIntegration:
+  enabled: true
+  amrControllerUrl: "http://amr-controller.warehouse-robots.svc.cluster.local:8080"
+  mqttBroker: "mosquitto.warehouse-robots.svc.cluster.local"
+  mqttPort: 1883
+  inventorySyncWebhook: "http://saleor.core-ecommerce.svc.cluster.local:8000/webhooks/odoo-inventory/"
+
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 20Gi
+
+postgresql:
+  enabled: false  # use shared Patroni cluster
+
+podSecurityContext:
+  runAsNonRoot: false  # Odoo requires root for some addons
+  fsGroup: 101

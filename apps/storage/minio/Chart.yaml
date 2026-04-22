@@ -1,0 +1,10 @@
+apiVersion: v2
+name: minio
+description: MinIO S3-compatible object storage
+type: application
+version: 1.0.0
+appVersion: "RELEASE.2024-07-04"
+dependencies:
+  - name: minio
+    version: "14.7.11"
+    repository: "https://charts.bitnami.com/bitnami"

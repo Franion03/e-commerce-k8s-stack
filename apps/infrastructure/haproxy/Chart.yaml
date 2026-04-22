@@ -1,0 +1,10 @@
+apiVersion: v2
+name: haproxy
+description: HAProxy Layer-7 load balancer with SSL termination
+type: application
+version: 1.0.0
+appVersion: "2.9"
+dependencies:
+  - name: haproxy
+    version: "1.21.0"
+    repository: "https://haproxytech.github.io/helm-charts"

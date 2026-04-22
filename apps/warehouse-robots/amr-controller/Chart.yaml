@@ -1,0 +1,9 @@
+apiVersion: v2
+name: amr-controller
+description: Autonomous Mobile Robot WCS/WES fleet management controller
+type: application
+version: 1.0.0
+appVersion: "1.0"
+maintainers:
+  - name: warehouse-team
+    email: warehouse@kiruz.com

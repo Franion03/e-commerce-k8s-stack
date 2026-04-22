@@ -1,0 +1,10 @@
+apiVersion: v2
+name: gitlab
+description: Self-hosted GitLab CE with CI/CD runners
+type: application
+version: 1.0.0
+appVersion: "17.0"
+dependencies:
+  - name: gitlab
+    version: "8.4.0"
+    repository: "https://charts.gitlab.io"

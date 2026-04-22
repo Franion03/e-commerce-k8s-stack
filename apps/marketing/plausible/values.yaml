@@ -1,0 +1,65 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/plausible/community-edition
+  tag: "v2.1"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: stats.kiruz.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: plausible-tls
+      hosts:
+        - stats.kiruz.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+env:
+  BASE_URL: "https://stats.kiruz.com"
+  DATABASE_URL: "postgresql://plausible:$(DB_PASSWORD)@postgresql-primary.storage.svc.cluster.local:5432/plausible"
+  CLICKHOUSE_DATABASE_URL: "http://clickhouse.marketing.svc.cluster.local:8123/plausible_events_db"
+  SECRET_KEY_BASE: ""    # ESO injected
+  MAILER_EMAIL: "noreply@kiruz.com"
+  SMTP_HOST_ADDR: "mailcow.marketing.svc.cluster.local"
+  SMTP_HOST_PORT: "587"
+  DISABLE_REGISTRATION: "true"
+
+# Clickhouse for event storage (Plausible requirement)
+clickhouse:
+  enabled: true
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "24.3"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: 50Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000

@@ -1,0 +1,90 @@
+{{- $issuers := .Values.clusterIssuers -}}
+---
+# ──────────────────────────────────────────────────────────────────
+# ClusterIssuer: letsencrypt-staging
+# Use this issuer for testing. Let's Encrypt staging CA is not
+# trusted by browsers, but has much higher rate limits.
+# Sync wave 1 — runs after cert-manager CRDs and controller are Ready.
+# ──────────────────────────────────────────────────────────────────
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: {{ $issuers.email | quote }}
+    # Stores the ACME account private key and cached certificate data.
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      # ── Primary: DNS-01 via Cloudflare (supports wildcards) ────
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: {{ $issuers.cloudflare.apiTokenSecretName | quote }}
+              key: {{ $issuers.cloudflare.apiTokenSecretKey | quote }}
+        selector:
+          dnsZones:
+            - "kiruz.com"
+      # ── Fallback: HTTP-01 via nginx ingress ────────────────────
+      - http01:
+          ingress:
+            class: {{ $issuers.http01.ingressClass | quote }}
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ClusterIssuer: letsencrypt-prod
+# Live Let's Encrypt certificates — used by all production Ingresses
+# via annotation: cert-manager.io/cluster-issuer: "letsencrypt-prod"
+# Sync wave 1 — same ordering constraint as staging issuer.
+# ──────────────────────────────────────────────────────────────────
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: {{ $issuers.email | quote }}
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      # ── Primary: DNS-01 via Cloudflare ─────────────────────────
+      # Handles wildcard certificates (*.kiruz.com) and avoids any
+      # HTTP routing dependency. Cloudflare propagates within seconds.
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: {{ $issuers.cloudflare.apiTokenSecretName | quote }}
+              key: {{ $issuers.cloudflare.apiTokenSecretKey | quote }}
+          cnameStrategy: Follow   # resolve CNAME chains if present
+        selector:
+          dnsZones:
+            - "kiruz.com"
+      # ── Fallback: HTTP-01 via nginx ingress ────────────────────
+      # Used for any domain not matched by the DNS-01 zone selector.
+      # cert-manager creates a temporary Ingress + Pod + Service in the
+      # certificate namespace; nginx ingress routes the challenge token.
+      - http01:
+          ingress:
+            class: {{ $issuers.http01.ingressClass | quote }}
+            podTemplate:
+              spec:
+                # Run solver pods with minimal privileges
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 1000
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: acmesolver
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities:
+                        drop:
+                          - ALL

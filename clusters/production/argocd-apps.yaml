@@ -1,0 +1,449 @@
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD AppProject for production environment
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ecommerce
+  namespace: argocd
+spec:
+  description: "Kiruz eCommerce platform — all production services"
+  sourceRepos:
+    - "https://gitlab.kiruz.com/kiruz/e-commerceStack.git"
+    - "https://charts.bitnami.com/bitnami"
+    - "https://argoproj.github.io/argo-helm"
+    - "https://charts.gitlab.io"
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://grafana.github.io/helm-charts"
+    - "https://cloudnative-pg.github.io/charts"
+    - "https://haproxytech.github.io/helm-charts"
+    - "https://helm.influxdata.com"
+    - "https://charts.jetstack.io"
+  destinations:
+    - namespace: "core-ecommerce"
+      server: "https://kubernetes.default.svc"
+    - namespace: "identity-security"
+      server: "https://kubernetes.default.svc"
+    - namespace: "infrastructure"
+      server: "https://kubernetes.default.svc"
+    - namespace: "gitops-cicd"
+      server: "https://kubernetes.default.svc"
+    - namespace: "monitoring"
+      server: "https://kubernetes.default.svc"
+    - namespace: "storage"
+      server: "https://kubernetes.default.svc"
+    - namespace: "warehouse-robots"
+      server: "https://kubernetes.default.svc"
+    - namespace: "marketing"
+      server: "https://kubernetes.default.svc"
+    - namespace: "argocd"
+      server: "https://kubernetes.default.svc"
+    - namespace: "cert-manager"
+      server: "https://kubernetes.default.svc"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRole
+    - group: "rbac.authorization.k8s.io"
+      kind: ClusterRoleBinding
+    - group: "apiextensions.k8s.io"
+      kind: CustomResourceDefinition
+    - group: "external-secrets.io"
+      kind: ClusterSecretStore
+    - group: "argoproj.io"
+      kind: AppProject
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  roles:
+    - name: platform-admin
+      description: "Full access to all applications"
+      policies:
+        - p, proj:ecommerce:platform-admin, applications, *, ecommerce/*, allow
+      groups:
+        - "kiruz:platform-team"
+    - name: developer
+      description: "Read-only access + sync for non-prod"
+      policies:
+        - p, proj:ecommerce:developer, applications, get, ecommerce/*, allow
+        - p, proj:ecommerce:developer, applications, sync, ecommerce/staging-*, allow
+      groups:
+        - "kiruz:developers"
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — Saleor
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: saleor
+  namespace: argocd
+  labels:
+    env: production
+    layer: core-ecommerce
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/core-ecommerce/saleor
+    helm:
+      valueFiles:
+        - values.yaml
+        - ../../clusters/production/overrides/saleor.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: core-ecommerce
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas   # managed by HPA
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data             # managed by External Secrets Operator
+  revisionHistoryLimit: 10
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — Next.js Storefront (Desktop / Tablet)
+# HAProxy routes PC + tablet User-Agents here (port 3000).
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nextjs-storefront-desktop
+  namespace: argocd
+  labels:
+    env: production
+    layer: core-ecommerce
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/core-ecommerce/nextjs-storefront
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: core-ecommerce
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — Next.js Storefront (Mobile / Phone)
+# HAProxy routes phone User-Agents here (port 3001).
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nextjs-storefront-mobile
+  namespace: argocd
+  labels:
+    env: production
+    layer: core-ecommerce
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/core-ecommerce/nextjs-storefront-mobile
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: core-ecommerce
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — Odoo WMS
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: odoo-wms
+  namespace: argocd
+  labels:
+    env: production
+    layer: core-ecommerce
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/core-ecommerce/odoo-wms
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: core-ecommerce
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — Keycloak
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+  labels:
+    env: production
+    layer: identity-security
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/identity-security/keycloak
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: identity-security
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — PostgreSQL (CloudNativePG)
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgresql
+  namespace: argocd
+  labels:
+    env: production
+    layer: storage
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/storage/postgresql
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: storage
+  syncPolicy:
+    automated:
+      prune: false    # NEVER auto-prune database resources
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true  # required for CNPG CRDs
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — Prometheus Stack
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-stack
+  namespace: argocd
+  labels:
+    env: production
+    layer: monitoring
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/monitoring/prometheus-stack
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — AMR Controller
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: amr-controller
+  namespace: argocd
+  labels:
+    env: production
+    layer: warehouse-robots
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/warehouse-robots/amr-controller
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: warehouse-robots
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 1m
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — cert-manager
+# Deploys cert-manager + ClusterIssuers (letsencrypt-prod and
+# letsencrypt-staging) via the official Jetstack Helm chart.
+# Must sync before any app that requires TLS certificates.
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  labels:
+    env: production
+    layer: identity-security
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ecommerce
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: main
+    path: apps/identity-security/cert-manager
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # required for cert-manager CRDs (size limit)
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  # Ignore CA bundle fields managed by cert-manager itself
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data   # account keys and cert data managed by cert-manager
+  revisionHistoryLimit: 10

@@ -1,0 +1,748 @@
+# ──────────────────────────────────────────────────────────────────
+# NetworkPolicies — Kiruz Platform
+# Strategy: default-deny all ingress+egress per namespace,
+# then explicitly allow required traffic paths.
+# ──────────────────────────────────────────────────────────────────
+
+# ── 1. Default Deny — core-ecommerce ─────────────────────────────
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: core-ecommerce
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── 2. Default Deny — identity-security ──────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: identity-security
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── 3. Default Deny — storage ─────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: storage
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── 4. Default Deny — warehouse-robots ───────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: warehouse-robots
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── 5. Default Deny — monitoring ─────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── 6. Allow HAProxy → Next.js Desktop (port 3000) ───────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-haproxy-to-nextjs-desktop
+  namespace: core-ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nextjs-storefront
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: haproxy
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# ── 6b. Allow HAProxy → Next.js Mobile (port 3001) ───────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-haproxy-to-nextjs-mobile
+  namespace: core-ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nextjs-storefront-mobile
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: haproxy
+      ports:
+        - protocol: TCP
+          port: 3001
+
+---
+# ── 7. Allow HAProxy → Saleor (port 8000) ────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-haproxy-to-saleor
+  namespace: core-ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: saleor
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: haproxy
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# ── 8. Allow Next.js → Saleor GraphQL ────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nextjs-to-saleor
+  namespace: core-ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: saleor
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nextjs-storefront
+      ports:
+        - protocol: TCP
+          port: 8000
+
+---
+# ── 9. Allow Saleor → PostgreSQL ─────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-saleor-to-postgresql
+  namespace: storage
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: pg-primary
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core-ecommerce
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: saleor
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# ── 10. Allow Saleor → Redis ──────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-saleor-to-redis
+  namespace: storage
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core-ecommerce
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# ── 11. Allow ALL permitted services → PostgreSQL ────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-namespaces-to-postgresql
+  namespace: storage
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: pg-primary
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - core-ecommerce
+                  - identity-security
+                  - gitops-cicd
+                  - marketing
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 5433   # PgBouncer
+
+---
+# ── 12. AMR Controller → Mosquitto MQTT only ─────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-amr-to-mqtt
+  namespace: warehouse-robots
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mosquitto
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: amr-controller
+      ports:
+        - protocol: TCP
+          port: 1883
+    # WireGuard subnet (physical robots)
+    - ipBlock:
+        cidr: 10.13.13.0/24
+
+---
+# ── 13. Mosquitto → InfluxDB (telemetry pipeline) ────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mqtt-to-influxdb
+  namespace: warehouse-robots
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: influxdb
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mosquitto
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: amr-controller
+      ports:
+        - protocol: TCP
+          port: 8086
+
+---
+# ── 14. AMR Controller egress — Odoo + MQTT only ─────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: amr-controller-egress
+  namespace: warehouse-robots
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: amr-controller
+  policyTypes:
+    - Egress
+  egress:
+    # MQTT broker
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mosquitto
+      ports:
+        - protocol: TCP
+          port: 1883
+    # InfluxDB telemetry
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: influxdb
+      ports:
+        - protocol: TCP
+          port: 8086
+    # Odoo WMS integration
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: core-ecommerce
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: odoo-wms
+      ports:
+        - protocol: TCP
+          port: 8069
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+---
+# ── 15. Prometheus scrape — all namespaces ───────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: core-ecommerce
+spec:
+  podSelector: {}   # all pods in namespace
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8000   # Saleor metrics
+        - protocol: TCP
+          port: 3000   # Next.js desktop metrics
+        - protocol: TCP
+          port: 3001   # Next.js mobile metrics
+        - protocol: TCP
+          port: 9090   # generic /metrics
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: warehouse-robots
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 8080   # AMR controller metrics
+        - protocol: TCP
+          port: 8086   # InfluxDB
+
+---
+# ── 16. Keycloak egress — PostgreSQL + SMTP ──────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-egress
+  namespace: identity-security
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: storage
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 5433
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: marketing
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mailcow
+      ports:
+        - protocol: TCP
+          port: 587
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+---
+# ── 17. Allow Saleor egress — PostgreSQL + Redis + MinIO ─────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: saleor-egress
+  namespace: core-ecommerce
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: saleor
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: storage
+      ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 5433
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 9000
+    # Keycloak OIDC
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: identity-security
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Tempo tracing
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 4318
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Stripe API (external HTTPS)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+
+# ──────────────────────────────────────────────────────────────────
+# cloudflared — Cloudflare Zero Trust Tunnel
+# ──────────────────────────────────────────────────────────────────
+
+---
+# ── 18. cloudflared egress — Cloudflare edge ─────────────────────
+# cloudflared opens outbound-only HTTPS / QUIC connections to
+# Cloudflare's edge (region1.v2.argotunnel.com on 7844/UDP and
+# fallback 443/TCP).  No inbound ports are ever exposed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-egress-cloudflare
+  namespace: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes:
+    - Egress
+  egress:
+    # ── Cloudflare edge — QUIC (preferred) ───────────────────────
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: UDP
+          port: 7844   # QUIC / h2 multiplexed tunnel
+        - protocol: TCP
+          port: 443    # TLS fallback when QUIC is blocked
+    # ── Cloudflare API (tunnel management) ───────────────────────
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+    # ── DNS ───────────────────────────────────────────────────────
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+---
+# ── 19. cloudflared egress — proxied cluster services ────────────
+# cloudflared forwards inbound Zero Trust traffic to the services
+# defined in config.yaml ingress rules.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared-egress-cluster-services
+  namespace: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes:
+    - Egress
+  egress:
+    # ArgoCD server (gRPC + HTTPS)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argocd
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-server
+      ports:
+        - protocol: TCP
+          port: 443
+    # Grafana
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: grafana
+      ports:
+        - protocol: TCP
+          port: 80
+    # Vaultwarden
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: identity-security
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vaultwarden
+      ports:
+        - protocol: TCP
+          port: 80
+    # n8n automation
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gitops-cicd
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: n8n
+      ports:
+        - protocol: TCP
+          port: 5678
+    # Kubernetes API server
+    - to:
+        - ipBlock:
+            cidr: 10.96.0.1/32   # kubernetes.default.svc ClusterIP
+      ports:
+        - protocol: TCP
+          port: 443
+
+---
+# ── 20. Allow cloudflared ingress — Prometheus metrics scrape ─────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape-cloudflared
+  namespace: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 2000   # cloudflared metrics port
+
+---
+# ── 21. Allow cloudflared egress — proxied target namespaces ─────
+# Allow the proxied services' namespaces to receive connections from
+# the infrastructure namespace (cloudflared pods).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cloudflared-from-infrastructure
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      ports:
+        - protocol: TCP
+          port: 443
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cloudflared-from-infrastructure
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      ports:
+        - protocol: TCP
+          port: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cloudflared-from-infrastructure
+  namespace: identity-security
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vaultwarden
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      ports:
+        - protocol: TCP
+          port: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cloudflared-from-infrastructure
+  namespace: gitops-cicd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: n8n
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      ports:
+        - protocol: TCP
+          port: 5678

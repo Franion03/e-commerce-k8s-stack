@@ -1,0 +1,130 @@
+# ──────────────────────────────────────────────────────────────────
+# Velero Backup Schedules — Kiruz Platform
+# ──────────────────────────────────────────────────────────────────
+
+# ── Pre-requisite: Velero installed with MinIO backend ────────────
+# helm install velero vmware-tanzu/velero \
+#   --namespace velero \
+#   --set configuration.provider=aws \
+#   --set configuration.backupStorageLocation.name=minio \
+#   --set configuration.backupStorageLocation.bucket=velero-backups \
+#   --set configuration.backupStorageLocation.config.region=minio \
+#   --set configuration.backupStorageLocation.config.s3ForcePathStyle=true \
+#   --set configuration.backupStorageLocation.config.s3Url=http://minio.storage.svc.cluster.local:9000 \
+#   --set credentials.secretContents.cloud="[default]\naws_access_key_id=MINIOKEY\naws_secret_access_key=MINIOSECRET"
+
+---
+# Daily full backup of ALL namespaces — retained 30 days
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-full-backup
+  namespace: velero
+spec:
+  schedule: "0 1 * * *"   # 01:00 UTC daily
+  template:
+    ttl: "720h"            # 30 days retention
+    storageLocation: minio
+    snapshotVolumes: true
+    volumeSnapshotLocations:
+      - minio
+    includedNamespaces:
+      - core-ecommerce
+      - identity-security
+      - infrastructure
+      - gitops-cicd
+      - monitoring
+      - storage
+      - warehouse-robots
+      - marketing
+    labelSelector: {}
+    hooks:
+      resources:
+        # Quiesce PostgreSQL before snapshot
+        - name: postgresql-backup-hook
+          includedNamespaces:
+            - storage
+          labelSelector:
+            matchLabels:
+              cnpg.io/cluster: pg-primary
+          pre:
+            - exec:
+                container: postgres
+                command:
+                  - /bin/sh
+                  - -c
+                  - "psql -U postgres -c 'CHECKPOINT;'"
+                onError: Continue
+                timeout: 30s
+
+---
+# Hourly incremental backup — warehouse-robots (time-series data)
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: hourly-warehouse-backup
+  namespace: velero
+spec:
+  schedule: "0 * * * *"   # every hour
+  template:
+    ttl: "168h"            # 7 days retention (supplemented by InfluxDB retention)
+    storageLocation: minio
+    snapshotVolumes: true
+    volumeSnapshotLocations:
+      - minio
+    includedNamespaces:
+      - warehouse-robots
+    labelSelector: {}
+
+---
+# Weekly backup — storage namespace (databases)
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-storage-backup
+  namespace: velero
+spec:
+  schedule: "0 0 * * 0"   # Sunday 00:00 UTC
+  template:
+    ttl: "2160h"           # 90 days retention
+    storageLocation: minio
+    snapshotVolumes: true
+    includedNamespaces:
+      - storage
+    labelSelector: {}
+
+---
+# Backup storage location (MinIO)
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: minio
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: velero-backups
+    prefix: "kiruz-prod"
+  config:
+    region: minio
+    s3ForcePathStyle: "true"
+    s3Url: "http://minio.storage.svc.cluster.local:9000"
+    insecureSkipTLSVerify: "true"
+  credential:
+    name: velero-minio-credentials
+    key: cloud
+  accessMode: ReadWrite
+
+---
+# Volume snapshot location
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: minio
+  namespace: velero
+spec:
+  provider: aws
+  config:
+    region: minio
+    s3ForcePathStyle: "true"
+    s3Url: "http://minio.storage.svc.cluster.local:9000"

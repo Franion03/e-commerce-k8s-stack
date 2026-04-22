@@ -1,0 +1,278 @@
+# ──────────────────────────────────────────────────────────────────
+# Kiruz eCommerce — GitLab CI/CD Pipeline
+# GitOps: lint → test → build → push → sync ArgoCD → validate
+# ──────────────────────────────────────────────────────────────────
+
+stages:
+  - validate
+  - build
+  - publish
+  - deploy
+  - smoke-test
+
+variables:
+  HELM_VERSION: "3.15.2"
+  KUBECONFORM_VERSION: "0.6.4"
+  DOCKER_TLS_CERTDIR: "/certs"
+  REGISTRY: "${CI_REGISTRY}"            # GitLab Container Registry
+  REGISTRY_IMAGE_SALEOR: "${CI_REGISTRY_IMAGE}/saleor"
+  REGISTRY_IMAGE_AMR: "${CI_REGISTRY_IMAGE}/amr-controller"
+  REGISTRY_IMAGE_CONTENT_WORKER: "${CI_REGISTRY_IMAGE}/content-worker"
+  ARGOCD_SERVER: "argocd.kiruz.com"
+  K8S_NAMESPACE_PROD: "core-ecommerce"
+  K8S_NAMESPACE_STAGING: "staging-core-ecommerce"
+
+# ── Caching ──────────────────────────────────────────────────────
+.helm-cache: &helm-cache
+  cache:
+    key: "helm-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .helm-cache/
+
+# ── Base image ───────────────────────────────────────────────────
+.helm-base: &helm-base
+  image:
+    name: alpine/helm:${HELM_VERSION}
+    entrypoint: [""]
+  <<: *helm-cache
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE: validate
+# ─────────────────────────────────────────────────────────────────
+
+helm:lint:
+  stage: validate
+  <<: *helm-base
+  script:
+    - apk add --no-cache git curl
+    # Install kubeconform
+    - |
+      curl -sSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+        | tar xz -C /usr/local/bin
+    # Lint every chart
+    - |
+      find apps -name "Chart.yaml" -exec dirname {} \; | while read chart; do
+        echo "==> Linting: $chart"
+        helm dependency update "$chart" 2>/dev/null || true
+        helm lint "$chart" --strict
+      done
+    # Template + kubeconform validation
+    - |
+      find apps -name "Chart.yaml" -exec dirname {} \; | while read chart; do
+        echo "==> Validating schema: $chart"
+        helm template test-release "$chart" \
+          | kubeconform \
+              -strict \
+              -ignore-missing-schemas \
+              -kubernetes-version "1.30.0" \
+              -schema-location default \
+              -summary
+      done
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+helm:diff:
+  stage: validate
+  image: alpine/helm:${HELM_VERSION}
+  before_script:
+    - apk add --no-cache git curl
+    - helm plugin install https://github.com/databus23/helm-diff --version 3.9.4 || true
+  script:
+    - echo "Helm diff requires kubeconfig — skipped in MR (use ArgoCD diff view instead)"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+      allow_failure: true
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE: build — Custom images only
+# ─────────────────────────────────────────────────────────────────
+.docker-build: &docker-build
+  stage: build
+  image: docker:26
+  services:
+    - docker:26-dind
+  before_script:
+    - docker login -u "${CI_REGISTRY_USER}" -p "${CI_REGISTRY_PASSWORD}" "${CI_REGISTRY}"
+
+build:saleor-custom:
+  <<: *docker-build
+  script:
+    - |
+      docker build \
+        --build-arg SALEOR_VERSION="${SALEOR_VERSION:-3.20}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --cache-from "${REGISTRY_IMAGE_SALEOR}:cache" \
+        --tag "${REGISTRY_IMAGE_SALEOR}:${CI_COMMIT_SHORT_SHA}" \
+        --tag "${REGISTRY_IMAGE_SALEOR}:latest" \
+        docker/saleor/
+    - docker push "${REGISTRY_IMAGE_SALEOR}:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${REGISTRY_IMAGE_SALEOR}:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+      changes:
+        - docker/saleor/**/*
+
+build:amr-controller:
+  <<: *docker-build
+  script:
+    - |
+      docker build \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --cache-from "${REGISTRY_IMAGE_AMR}:cache" \
+        --tag "${REGISTRY_IMAGE_AMR}:${CI_COMMIT_SHORT_SHA}" \
+        --tag "${REGISTRY_IMAGE_AMR}:latest" \
+        docker/amr-controller/
+    - docker push "${REGISTRY_IMAGE_AMR}:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${REGISTRY_IMAGE_AMR}:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+      changes:
+        - docker/amr-controller/**/*
+
+build:content-worker:
+  <<: *docker-build
+  script:
+    - |
+      docker build \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --cache-from "${REGISTRY_IMAGE_CONTENT_WORKER}:cache" \
+        --tag "${REGISTRY_IMAGE_CONTENT_WORKER}:${CI_COMMIT_SHORT_SHA}" \
+        --tag "${REGISTRY_IMAGE_CONTENT_WORKER}:latest" \
+        docker/content-worker/
+    - docker push "${REGISTRY_IMAGE_CONTENT_WORKER}:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${REGISTRY_IMAGE_CONTENT_WORKER}:latest"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+      changes:
+        - docker/content-worker/**/*
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE: publish — Package and push Helm charts
+# ─────────────────────────────────────────────────────────────────
+helm:publish:
+  stage: publish
+  <<: *helm-base
+  script:
+    - apk add --no-cache git
+    - |
+      find apps -name "Chart.yaml" -exec dirname {} \; | while read chart; do
+        helm dependency update "$chart" 2>/dev/null || true
+        helm package "$chart" --destination .helm-packages/
+      done
+    - |
+      # Push to GitLab Helm registry
+      for pkg in .helm-packages/*.tgz; do
+        helm push "$pkg" "oci://${CI_REGISTRY_IMAGE}/charts" || true
+      done
+  artifacts:
+    paths:
+      - .helm-packages/
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE: deploy — Trigger ArgoCD sync
+# ─────────────────────────────────────────────────────────────────
+.argocd-base: &argocd-base
+  image:
+    name: argoproj/argocd:v2.11.0
+    entrypoint: [""]
+  before_script:
+    - argocd login "${ARGOCD_SERVER}"
+        --username "${ARGOCD_USERNAME}"
+        --password "${ARGOCD_PASSWORD}"
+        --grpc-web
+        --insecure
+
+deploy:staging:
+  <<: *argocd-base
+  stage: deploy
+  environment:
+    name: staging
+    url: https://shop-staging.kiruz.com
+  script:
+    # Sync all staging applications
+    - argocd app sync --selector "env=staging" --prune --timeout 300
+    - argocd app wait --selector "env=staging" --health --timeout 300
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+deploy:production:
+  <<: *argocd-base
+  stage: deploy
+  environment:
+    name: production
+    url: https://shop.kiruz.com
+  script:
+    # Sync all production applications (ordered — infrastructure before app layer)
+    - argocd app sync postgresql redis minio --timeout 300
+    - argocd app wait postgresql redis minio --health --timeout 300
+    - argocd app sync keycloak --timeout 180
+    - argocd app wait keycloak --health --timeout 180
+    - argocd app sync saleor nextjs-storefront odoo-wms --timeout 300
+    - argocd app wait saleor nextjs-storefront odoo-wms --health --timeout 300
+    - argocd app sync --selector "env=production" --timeout 300
+    - argocd app wait --selector "env=production" --health --timeout 300
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual   # production deploy requires manual approval
+
+# ─────────────────────────────────────────────────────────────────
+# STAGE: smoke-test — Validate rollout
+# ─────────────────────────────────────────────────────────────────
+smoke:staging:
+  stage: smoke-test
+  image: curlimages/curl:8
+  script:
+    - |
+      # Storefront health
+      curl -sf --retry 5 --retry-delay 10 \
+        "https://shop-staging.kiruz.com/api/health" | grep -q "ok"
+      # Saleor GraphQL endpoint
+      curl -sf --retry 5 --retry-delay 10 \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{shop{name}}"}' \
+        "https://api-staging.kiruz.com/graphql/" | grep -q "kiruz"
+      echo "Staging smoke tests passed"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  needs: ["deploy:staging"]
+
+smoke:production:
+  stage: smoke-test
+  image: curlimages/curl:8
+  script:
+    - |
+      curl -sf --retry 5 --retry-delay 15 \
+        "https://shop.kiruz.com/api/health" | grep -q "ok"
+      curl -sf --retry 5 --retry-delay 15 \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{shop{name}}"}' \
+        "https://api.kiruz.com/graphql/" | grep -q "kiruz"
+      # AMR controller health
+      curl -sf --retry 3 --retry-delay 10 \
+        "https://amr.kiruz.local/health" | grep -q "ok" || echo "AMR health check skipped (VPN only)"
+      echo "Production smoke tests passed"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  needs: ["deploy:production"]
+
+# ─────────────────────────────────────────────────────────────────
+# Notification on failure
+# ─────────────────────────────────────────────────────────────────
+notify:failure:
+  stage: smoke-test
+  image: curlimages/curl:8
+  script:
+    - |
+      curl -X POST "${SLACK_WEBHOOK_URL}" \
+        -H "Content-Type: application/json" \
+        -d "{\"text\":\":red_circle: Pipeline FAILED on \`${CI_COMMIT_BRANCH}\` — ${CI_PIPELINE_URL}\"}"
+  when: on_failure
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'

@@ -1,0 +1,58 @@
+loki:
+  deploymentMode: SimpleScalable
+
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    storage:
+      type: s3
+      s3:
+        endpoint: http://minio.storage.svc.cluster.local:9000
+        region: us-east-1
+        bucketnames: loki-chunks
+        access_key_id: ""        # ESO injected
+        secret_access_key: ""    # ESO injected
+        insecure: true
+        s3forcepathstyle: true
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: s3
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+  read:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+  write:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+  backend:
+    replicas: 1
+
+  # Promtail (log shipper on every node)
+  promtail:
+    enabled: true
+
+  gateway:
+    enabled: true
+    ingress:
+      enabled: false   # internal only

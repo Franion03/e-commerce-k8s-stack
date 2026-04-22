@@ -1,0 +1,56 @@
+replicaCount: 1
+
+image:
+  repository: linuxserver/wireguard
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: LoadBalancer          # expose UDP 51820 externally
+  port: 51820
+  protocol: UDP
+  annotations:
+    metallb.universe.tf/allow-shared-ip: "wireguard"
+
+# Peers are stored as a Secret (ESO from Vault)
+peerConfigSecret: wireguard-peers
+
+env:
+  PUID: "1000"
+  PGID: "1000"
+  TZ: "Europe/Madrid"
+  SERVERURL: "vpn.kiruz.com"
+  SERVERPORT: "51820"
+  PEERS: "warehouse-node1,warehouse-node2,office-jumphost"
+  PEERDNS: "10.96.0.10"   # CoreDNS cluster IP
+  INTERNAL_SUBNET: "10.13.13.0"
+  ALLOWEDIPS: "0.0.0.0/0"
+
+# Privileged required for WireGuard kernel module
+securityContext:
+  privileged: true
+  capabilities:
+    add:
+      - NET_ADMIN
+      - SYS_MODULE
+
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 1Gi
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Kernel module host path (node must have wireguard module)
+hostNetwork: false
+hostMounts:
+  - name: lib-modules
+    hostPath: /lib/modules
+    mountPath: /lib/modules
+    readOnly: true

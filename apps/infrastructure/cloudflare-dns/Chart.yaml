@@ -1,0 +1,10 @@
+apiVersion: v2
+name: cloudflare-dns
+description: Cloudflare DNS + Tunnel integration (ExternalDNS + cloudflared)
+type: application
+version: 1.0.0
+appVersion: "2024.4"
+dependencies:
+  - name: external-dns
+    version: "8.0.0"
+    repository: "https://charts.bitnami.com/bitnami"

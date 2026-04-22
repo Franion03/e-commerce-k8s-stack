@@ -1,0 +1,9 @@
+apiVersion: v2
+name: nextjs-storefront
+description: Saleor Next.js Official Storefront (TypeScript + Tailwind)
+type: application
+version: 1.0.0
+appVersion: "3.20"
+maintainers:
+  - name: platform-team
+    email: platform@kiruz.com

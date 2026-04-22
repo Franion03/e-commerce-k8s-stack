@@ -1,0 +1,140 @@
+---
+# Production cluster configuration
+# Applied by bootstrap script before ArgoCD is installed
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: argocd
+data:
+  cluster_name: "kiruz-prod"
+  environment: "production"
+  region: "eu-west"
+  k8s_version: "1.30"
+  cni: "cilium"
+  ingress_class: "nginx"
+  storage_class: "longhorn"
+  cert_issuer: "letsencrypt-prod"
+  argocd_version: "2.11"
+  gitops_repo: "https://gitlab.kiruz.com/kiruz/e-commerceStack.git"
+
+---
+# Namespace definitions with resource quotas
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: core-ecommerce
+  labels:
+    istio-injection: disabled
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: identity-security
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: infrastructure
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitops-cicd
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: warehouse-robots
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marketing
+  labels:
+    env: production
+
+---
+# ResourceQuotas per namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: core-ecommerce-quota
+  namespace: core-ecommerce
+spec:
+  hard:
+    requests.cpu: "16"
+    requests.memory: 32Gi
+    limits.cpu: "32"
+    limits.memory: 64Gi
+    persistentvolumeclaims: "20"
+    services.loadbalancers: "2"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: storage-quota
+  namespace: storage
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    persistentvolumeclaims: "20"
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: warehouse-robots-quota
+  namespace: warehouse-robots
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    persistentvolumeclaims: "10"
+
+---
+# LimitRange defaults
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: core-ecommerce
+spec:
+  limits:
+    - default:
+        cpu: "1"
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      type: Container

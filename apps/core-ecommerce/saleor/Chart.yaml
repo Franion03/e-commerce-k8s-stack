@@ -1,0 +1,22 @@
+apiVersion: v2
+name: saleor
+description: Saleor GraphQL headless ecommerce backend
+type: application
+version: 1.0.0
+appVersion: "3.20"
+keywords:
+  - ecommerce
+  - graphql
+  - saleor
+maintainers:
+  - name: platform-team
+    email: platform@kiruz.com
+dependencies:
+  - name: postgresql
+    version: "15.5.38"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "19.6.4"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled

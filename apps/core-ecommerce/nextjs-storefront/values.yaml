@@ -1,0 +1,62 @@
+replicaCount: 3
+
+image:
+  repository: registry.gitlab.kiruz.com/kiruz/nextjs-storefront-desktop
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  # Port 3000 — desktop / tablet build
+  port: 3000
+
+ingress:
+  # No direct Ingress — HAProxy routes PC+tablet UA traffic here via
+  # nextjs-desktop-backend on port 3000. An internal health-check path
+  # is reachable cluster-internally via ClusterIP.
+  enabled: false
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+env:
+  NEXT_PUBLIC_SALEOR_API_URL: "https://api.kiruz.com/graphql/"
+  NEXT_PUBLIC_STOREFRONT_URL: "https://shop.kiruz.com"
+  NEXT_PUBLIC_DEFAULT_CHANNEL: "default-channel"
+  NEXT_PUBLIC_CHECKOUT_APP_URL: "https://checkout.kiruz.com"
+  # Desktop/tablet-specific settings
+  NEXT_PUBLIC_DEVICE_TARGET: "desktop"
+  NEXT_PUBLIC_IMAGE_MAX_WIDTH: "1920"
+  NEXT_PUBLIC_ENABLE_PWA: "false"
+  PORT: "3000"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [nextjs-storefront]
+          topologyKey: kubernetes.io/hostname

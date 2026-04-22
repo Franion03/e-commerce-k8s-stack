@@ -1,0 +1,308 @@
+# ──────────────────────────────────────────────────────────────────
+# Prometheus Alert Rules — Kiruz Platform
+# ──────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kiruz-alerts
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+
+    # ── 1. Service Availability ────────────────────────────────────
+    - name: service.availability
+      interval: 1m
+      rules:
+        - alert: ServiceHighErrorRate
+          expr: |
+            (
+              sum(rate(http_requests_total{status=~"5.."}[5m])) by (job, namespace)
+              /
+              sum(rate(http_requests_total[5m])) by (job, namespace)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High 5xx error rate on {{ $labels.job }}"
+            description: "{{ $labels.job }} in {{ $labels.namespace }} has >5% HTTP 5xx errors for 5m (current: {{ $value | humanizePercentage }})"
+            runbook_url: "https://wiki.kiruz.com/runbooks/high-error-rate"
+
+        - alert: ServiceDown
+          expr: |
+            up{job=~"saleor|nextjs-storefront|odoo-wms|keycloak|amr-controller"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Service {{ $labels.job }} is DOWN"
+            description: "{{ $labels.job }} on {{ $labels.instance }} has been down for 2 minutes."
+            runbook_url: "https://wiki.kiruz.com/runbooks/service-down"
+
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} is crash-looping"
+            description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) has restarted {{ $value | humanize }} times in the last 15m"
+
+        - alert: PodNotReady
+          expr: |
+            kube_pod_status_ready{condition="false"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} not ready"
+            description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a not-ready state for 10m"
+
+    # ── 2. Latency ─────────────────────────────────────────────────
+    - name: service.latency
+      interval: 1m
+      rules:
+        - alert: HighLatencyP99
+          expr: |
+            histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+            > 0.5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High P99 latency on {{ $labels.job }}"
+            description: "P99 response time is {{ $value | humanizeDuration }} (threshold: 500ms)"
+
+        - alert: SaleorGraphQLLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(django_http_requests_latency_seconds_by_view_method_bucket{view="SaleorGraphQLView"}[5m]))
+              by (le)
+            ) > 1.0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Saleor GraphQL P99 latency > 1s"
+            description: "Saleor GraphQL P99 = {{ $value | humanizeDuration }}"
+
+    # ── 3. Database ────────────────────────────────────────────────
+    - name: database
+      interval: 1m
+      rules:
+        - alert: PostgreSQLConnectionPoolExhausted
+          expr: |
+            pgbouncer_pools_cl_waiting > 10
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PgBouncer connection pool nearly exhausted"
+            description: "{{ $value }} clients waiting for a DB connection. Pool may be exhausted."
+
+        - alert: PostgreSQLReplicationLag
+          expr: |
+            pg_replication_lag > 30
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PostgreSQL replication lag > 30s"
+            description: "Replica {{ $labels.instance }} is {{ $value | humanizeDuration }} behind primary"
+
+        - alert: PostgreSQLPrimaryDown
+          expr: |
+            cnpg_collector_pg_wal_buffers_full == 0
+            and on (namespace, pod)
+            kube_pod_status_ready{condition="true"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PostgreSQL primary pod not ready"
+
+        - alert: RedisHighMemoryUsage
+          expr: |
+            redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Redis memory usage > 85%"
+            description: "Redis on {{ $labels.instance }} is using {{ $value | humanizePercentage }} of max memory"
+
+    # ── 4. Warehouse / Robots ──────────────────────────────────────
+    - name: warehouse.robots
+      interval: 30s
+      rules:
+        - alert: RobotOffline
+          expr: |
+            time() - robot_last_heartbeat_timestamp_seconds > 120
+          for: 2m
+          labels:
+            severity: critical
+            team: warehouse
+          annotations:
+            summary: "Robot {{ $labels.robot_id }} offline"
+            description: "Robot {{ $labels.robot_id }} ({{ $labels.model }}) in {{ $labels.zone }} has not sent a heartbeat for >2 minutes"
+            runbook_url: "https://wiki.kiruz.com/runbooks/robot-offline"
+
+        - alert: RobotBatteryLow
+          expr: |
+            robot_battery_percentage < 15
+          for: 5m
+          labels:
+            severity: warning
+            team: warehouse
+          annotations:
+            summary: "Robot {{ $labels.robot_id }} battery low ({{ $value }}%)"
+
+        - alert: MQTTBrokerDown
+          expr: |
+            up{job="mosquitto"} == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: warehouse
+          annotations:
+            summary: "MQTT broker (Mosquitto) is DOWN"
+            description: "All robot telemetry collection has stopped"
+
+        - alert: HighTaskFailureRate
+          expr: |
+            rate(amr_task_failures_total[10m]) / rate(amr_tasks_total[10m]) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            team: warehouse
+          annotations:
+            summary: "AMR task failure rate > 10%"
+            description: "{{ $value | humanizePercentage }} of robot tasks are failing"
+
+    # ── 5. Infrastructure ──────────────────────────────────────────
+    - name: infrastructure
+      interval: 1m
+      rules:
+        - alert: DiskUsageHigh
+          expr: |
+            (
+              (node_filesystem_size_bytes{fstype!~"tmpfs|squashfs"} - node_filesystem_free_bytes)
+              / node_filesystem_size_bytes
+            ) > 0.80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Disk usage > 80% on {{ $labels.instance }}"
+            description: "Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is {{ $value | humanizePercentage }} full"
+
+        - alert: DiskUsageCritical
+          expr: |
+            (
+              (node_filesystem_size_bytes{fstype!~"tmpfs|squashfs"} - node_filesystem_free_bytes)
+              / node_filesystem_size_bytes
+            ) > 0.95
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Disk nearly full (>95%) on {{ $labels.instance }}"
+
+        - alert: NodeMemoryPressure
+          expr: |
+            node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ $labels.instance }} memory < 10% available"
+
+        - alert: NodeCPUHigh
+          expr: |
+            100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CPU > 90% on {{ $labels.instance }} for 10m"
+
+        - alert: PersistentVolumeNearFull
+          expr: |
+            (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PersistentVolume {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full"
+
+    # ── 6. TLS Certificate Expiry ──────────────────────────────────
+    - name: tls.certificates
+      interval: 6h
+      rules:
+        - alert: CertificateExpiringSoon
+          expr: |
+            certmanager_certificate_expiration_timestamp_seconds - time() < 7 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.name }} expires in < 7 days"
+            description: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires at {{ $value | humanizeTimestamp }}"
+
+        - alert: CertificateExpiredOrFailed
+          expr: |
+            certmanager_certificate_ready_status{condition="False"} == 1
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate {{ $labels.name }} is NOT ready"
+
+    # ── 7. MinIO / Storage ─────────────────────────────────────────
+    - name: storage.minio
+      interval: 5m
+      rules:
+        - alert: MinIODown
+          expr: |
+            up{job="minio"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "MinIO is DOWN — object storage unavailable"
+
+        - alert: MinIOHighErrorRate
+          expr: |
+            rate(minio_s3_requests_errors_total[5m]) / rate(minio_s3_requests_total[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MinIO S3 error rate > 5%"
+
+    # ── 8. ArgoCD Sync Alerts ──────────────────────────────────────
+    - name: gitops.argocd
+      interval: 5m
+      rules:
+        - alert: ArgoCDAppOutOfSync
+          expr: |
+            argocd_app_info{sync_status!="Synced"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} is out of sync for 15m"
+            description: "App {{ $labels.name }} in project {{ $labels.project }} sync status: {{ $labels.sync_status }}"
+
+        - alert: ArgoCDAppUnhealthy
+          expr: |
+            argocd_app_info{health_status!="Healthy"} == 1
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} is unhealthy"

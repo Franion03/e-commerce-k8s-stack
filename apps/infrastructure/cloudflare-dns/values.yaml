@@ -1,0 +1,136 @@
+# ExternalDNS syncs K8s Ingress/Service annotations → Cloudflare DNS
+external-dns:
+  provider: cloudflare
+  cloudflare:
+    secretName: cloudflare-api-token
+    proxied: true    # enable Cloudflare proxy (CDN + DDoS)
+  sources:
+    - ingress
+    - service
+  domainFilters:
+    - kiruz.com
+  txtOwnerId: "kiruz-k8s-prod"
+  policy: sync
+  interval: 1m
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── cloudflared — Cloudflare Zero Trust Tunnel ───────────────────
+# Provides two capabilities:
+#
+#   1. PUBLIC HOSTNAME ACCESS (Zero Trust)
+#      Admin UIs (ArgoCD, Grafana, Vault, n8n) are reachable through
+#      the tunnel with Cloudflare Access identity policies applied.
+#      Traffic never touches the public internet between cluster and CF.
+#
+#   2. PRIVATE NETWORK ACCESS (WARP clients)
+#      WARP-connected devices (laptops, phones, warehouse nodes) can
+#      reach Kubernetes Service CIDR, Pod CIDR and local LAN CIDRs
+#      directly.  No VPN client config needed beyond WARP enrolment.
+#
+# Bootstrap steps (run once per cluster, before ArgoCD syncs):
+#   cloudflared tunnel login
+#   cloudflared tunnel create kiruz-k8s-prod
+#   # Output: Tunnel credentials written to ~/.cloudflared/<UUID>.json
+#   # Store that JSON in Vault at: infrastructure/cloudflared
+#   #   key: credentials-json  (full JSON string as one value)
+#   #   key: tunnel-id         (UUID string)
+#   # Then add private routes in Zero Trust → Networks → Routes:
+#   #   10.96.0.0/12   → kiruz-k8s-prod
+#   #   10.100.0.0/16  → kiruz-k8s-prod
+#   #   192.168.1.0/24 → kiruz-k8s-prod
+cloudflared:
+  enabled: true
+
+  replicaCount: 2   # 2 connectors for HA; Cloudflare load-balances across them
+
+  image:
+    repository: cloudflare/cloudflared
+    tag: "2025.4.0"
+    pullPolicy: IfNotPresent
+
+  # Tunnel UUID — set this to the UUID returned by `cloudflared tunnel create`
+  # or leave empty and let the ExternalSecret populate it via the credentials JSON.
+  # Used to name the tunnel in config.yaml.
+  tunnelName: "kiruz-k8s-prod"
+
+  # ── Private network routing (WARP) ──────────────────────────────
+  # CIDRs advertised to Cloudflare WARP clients through this tunnel.
+  # Matching split-routes must also exist in:
+  #   Zero Trust → Networks → Routes → Add route
+  privateNetworks:
+    - cidr: "10.96.0.0/12"
+      comment: "Kubernetes Service CIDR"
+    - cidr: "10.100.0.0/16"
+      comment: "Kubernetes Pod CIDR (Cilium default)"
+    - cidr: "192.168.1.0/24"
+      comment: "Office and warehouse floor local LAN"
+
+  # ── Public hostname ingress rules ────────────────────────────────
+  # Requests to these hostnames are routed from Cloudflare's edge to
+  # the stated in-cluster service.  Each hostname should have a
+  # corresponding Cloudflare Access application policy in the ZT dashboard
+  # (Identity Provider: Keycloak OIDC) to enforce authentication.
+  ingress:
+    - hostname: argocd.kiruz.com
+      service: https://argocd-server.argocd.svc.cluster.local:443
+      originRequest:
+        # ArgoCD uses a self-signed cert issued by its own CA — verify with
+        # the in-cluster CA bundle instead of disabling verification.
+        noTLSVerify: false
+        caPool: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        # Pass gRPC (argocd CLI) and HTTP
+        http2Origin: true
+
+    - hostname: grafana.kiruz.com
+      service: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80
+
+    - hostname: vault.kiruz.com
+      service: http://vaultwarden.identity-security.svc.cluster.local:80
+
+    - hostname: n8n.kiruz.com
+      service: http://n8n.gitops-cicd.svc.cluster.local:5678
+
+    # kubectl / K8s API access for WARP laptop users
+    # Usage: export KUBECONFIG pointing to https://k8s-api.kiruz.com
+    # Cloudflare Access requires a valid service token or WARP session.
+    - hostname: k8s-api.kiruz.com
+      service: https://kubernetes.default.svc.cluster.local:443
+      originRequest:
+        noTLSVerify: false
+        caPool: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+  # ── Resources ───────────────────────────────────────────────────
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+  # ── Prometheus metrics (exposed on :2000/metrics) ────────────────
+  metrics:
+    enabled: true
+    port: 2000
+
+  # ── ExternalSecret — tunnel credentials JSON ─────────────────────
+  # The credentials JSON file is produced by `cloudflared tunnel create`
+  # and must be stored in Vault before this chart is synced.
+  externalSecrets:
+    enabled: true
+    refreshInterval: "1h"
+    secretStoreRef:
+      name: vault-backend
+      kind: ClusterSecretStore
+    # Vault path: infrastructure/cloudflared
+    # Keys expected:
+    #   credentials-json  — full tunnel credentials JSON (single-line string)
+    #   tunnel-id         — UUID of the tunnel (e.g. "abc123-...")
+    vaultPath: "infrastructure/cloudflared"

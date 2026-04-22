@@ -1,0 +1,184 @@
+# ──────────────────────────────────────────────
+# Saleor — values.yaml
+# ──────────────────────────────────────────────
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/saleor/saleor
+  tag: "3.20"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Service account ──────────────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ── Service ──────────────────────────────────
+service:
+  type: ClusterIP
+  port: 8000
+  containerPort: 8000
+
+# ── Ingress ──────────────────────────────────
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # Cloudflare Real-IP passthrough
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+    nginx.ingress.kubernetes.io/forwarded-for-header: "CF-Connecting-IP"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: api.kiruz.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: saleor-tls
+      hosts:
+        - api.kiruz.com
+
+# ── Resources ────────────────────────────────
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# ── Autoscaling ──────────────────────────────
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ── Probes ───────────────────────────────────
+livenessProbe:
+  httpGet:
+    path: /health/
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health/
+    port: 8000
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+
+# ── Environment ──────────────────────────────
+env:
+  # Django
+  DEBUG: "false"
+  ALLOWED_HOSTS: "api.kiruz.com,localhost"
+  ALLOWED_CLIENT_HOSTS: "shop.kiruz.com,dashboard.kiruz.com"
+  DEFAULT_FROM_EMAIL: "noreply@kiruz.com"
+  # Celery / Redis
+  CELERY_BROKER_URL: "redis://redis-master.storage.svc.cluster.local:6379/1"
+  # Database (overridden via secret)
+  DATABASE_URL: ""
+  # Media (MinIO)
+  AWS_MEDIA_BUCKET_NAME: "saleor-media"
+  AWS_STORAGE_BUCKET_NAME: "saleor-static"
+  AWS_S3_ENDPOINT_URL: "http://minio.storage.svc.cluster.local:9000"
+  # Keycloak OIDC
+  OIDC_CLIENT_ID: "saleor"
+  OIDC_WELL_KNOWN_URL: "https://auth.kiruz.com/realms/kiruz/.well-known/openid-configuration"
+
+# ── Secret refs (External Secrets Operator) ──
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  refreshInterval: "1h"
+  data:
+    - secretKey: DATABASE_URL
+      remoteRef:
+        key: secret/saleor
+        property: database_url
+    - secretKey: SECRET_KEY
+      remoteRef:
+        key: secret/saleor
+        property: secret_key
+    - secretKey: AWS_ACCESS_KEY_ID
+      remoteRef:
+        key: secret/saleor
+        property: minio_access_key
+    - secretKey: AWS_SECRET_ACCESS_KEY
+      remoteRef:
+        key: secret/saleor
+        property: minio_secret_key
+    - secretKey: STRIPE_SECRET_KEY
+      remoteRef:
+        key: secret/saleor
+        property: stripe_secret_key
+
+# ── Pod Disruption Budget ─────────────────────
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# ── Security context ─────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# ── Node scheduling ──────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - saleor
+          topologyKey: kubernetes.io/hostname
+
+# ── Bundled PostgreSQL (disabled in prod; use external Patroni) ──
+postgresql:
+  enabled: false
+
+# ── Bundled Redis (disabled in prod; use shared Redis) ──
+redis:
+  enabled: false
+
+# ── Dashboard (separate deploy) ──────────────
+dashboard:
+  enabled: true
+  image:
+    repository: ghcr.io/saleor/saleor-dashboard
+    tag: "3.20"
+  replicaCount: 1
+  service:
+    port: 9000
+  ingress:
+    host: dashboard.kiruz.com
+    tlsSecret: saleor-dashboard-tls

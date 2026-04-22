@@ -1,0 +1,97 @@
+---
+# Staging cluster — all apps in manual sync mode (no auto-prune)
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ecommerce-staging
+  namespace: argocd
+spec:
+  description: "Kiruz eCommerce platform — staging environment"
+  sourceRepos:
+    - "https://gitlab.kiruz.com/kiruz/e-commerceStack.git"
+    - "https://charts.bitnami.com/bitnami"
+    - "https://argoproj.github.io/argo-helm"
+    - "https://prometheus-community.github.io/helm-charts"
+    - "https://grafana.github.io/helm-charts"
+    - "https://cloudnative-pg.github.io/charts"
+    - "https://helm.influxdata.com"
+    - "https://charts.jetstack.io"
+  destinations:
+    - namespace: "*"
+      server: "https://kubernetes.default.svc"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: staging-saleor
+  namespace: argocd
+  labels:
+    env: staging
+    layer: core-ecommerce
+spec:
+  project: ecommerce-staging
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: develop    # staging tracks develop branch
+    path: apps/core-ecommerce/saleor
+    helm:
+      valueFiles:
+        - values.yaml
+        - ../../clusters/staging/overrides/saleor.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging-core-ecommerce
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    # manual sync — no automated reconciliation
+
+---
+# ──────────────────────────────────────────────────────────────────
+# ArgoCD Application — cert-manager (staging)
+# Installs the same chart; staging workloads annotate their Ingresses
+# with cert-manager.io/cluster-issuer: "letsencrypt-staging" to avoid
+# consuming Let’s Encrypt production rate limits during testing.
+# ──────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: staging-cert-manager
+  namespace: argocd
+  labels:
+    env: staging
+    layer: identity-security
+spec:
+  project: ecommerce-staging
+  source:
+    repoURL: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+    targetRevision: develop
+    path: apps/identity-security/cert-manager
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # manual sync — no automated reconciliation
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jsonPointers:
+        - /webhooks/0/clientConfig/caBundle
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data

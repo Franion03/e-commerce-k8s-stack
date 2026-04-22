@@ -1,0 +1,6 @@
+apiVersion: v2
+name: n8n
+description: Self-hosted workflow automation engine
+type: application
+version: 1.0.0
+appVersion: "1.45"

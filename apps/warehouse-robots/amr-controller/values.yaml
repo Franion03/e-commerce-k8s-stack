@@ -1,0 +1,95 @@
+replicaCount: 2   # active/active with distributed task lock via Redis
+
+image:
+  repository: registry.gitlab.kiruz.com/kiruz/amr-controller
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080        # REST API for Odoo integration
+  grpcPort: 50051   # gRPC for robot comm
+
+ingress:
+  enabled: false   # internal service only; accessed via WireGuard VPN
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# Robot fleet configuration
+fleet:
+  robots:
+    - id: "amr-001"
+      model: "reeman-spider"
+      zone: "zone-A"
+      homeStation: "dock-01"
+    - id: "amr-002"
+      model: "reeman-spider"
+      zone: "zone-B"
+      homeStation: "dock-02"
+    - id: "amr-003"
+      model: "hkk-amr"
+      zone: "zone-C"
+      homeStation: "dock-03"
+  asrs:
+    - id: "asrs-001"
+      model: "vertical-carousel"
+      zone: "aisle-1"
+
+# MQTT broker connection
+mqtt:
+  broker: "mosquitto.warehouse-robots.svc.cluster.local"
+  port: 1883
+  topicPrefix: "robots"
+  qos: 1
+
+# Odoo WMS integration
+odoo:
+  url: "http://odoo-wms.core-ecommerce.svc.cluster.local:8069"
+  database: "odoo"
+  # credentials via ExternalSecret
+
+# Map server (ROS-compatible SLAM map)
+mapServer:
+  enabled: true
+  mapFile: "/maps/warehouse.pgm"
+  resolution: 0.05   # 5cm per pixel
+
+# InfluxDB telemetry
+influxdb:
+  url: "http://influxdb.warehouse-robots.svc.cluster.local:8086"
+  database: "robot_telemetry"
+  org: "kiruz"
+  bucket: "robots"
+
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  size: 2Gi    # for local map cache
+
+podAntiAffinity:
+  enabled: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10

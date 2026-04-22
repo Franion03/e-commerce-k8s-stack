@@ -1,0 +1,13 @@
+apiVersion: v2
+name: keycloak
+description: Keycloak SSO — OAuth2/OIDC + Push MFA for all services
+type: application
+version: 1.0.0
+appVersion: "24.0"
+maintainers:
+  - name: platform-team
+    email: platform@kiruz.com
+dependencies:
+  - name: keycloak
+    version: "22.2.5"
+    repository: "https://charts.bitnami.com/bitnami"

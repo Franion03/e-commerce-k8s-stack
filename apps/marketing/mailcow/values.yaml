@@ -1,0 +1,73 @@
+# Mailcow runs best as docker-compose on a dedicated node.
+# This Helm chart wraps a single-pod deployment suitable for low volume.
+# For production, consider deploying mailcow on a dedicated VM outside K8s
+# and using its SMTP/API endpoint from within the cluster.
+
+replicaCount: 1
+
+image:
+  repository: mailcow/mailcow-dockerized
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  smtp:
+    type: LoadBalancer
+    port: 25
+    submissionPort: 587
+  imaps:
+    type: LoadBalancer
+    port: 993
+  http:
+    type: ClusterIP
+    port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: mail.kiruz.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mailcow-tls
+      hosts:
+        - mail.kiruz.com
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+env:
+  MAILCOW_HOSTNAME: "mail.kiruz.com"
+  TZ: "Europe/Madrid"
+  SMTP_PORT: "25"
+  SMTPS_PORT: "465"
+  SUBMISSION_PORT: "587"
+  IMAP_PORT: "143"
+  IMAPS_PORT: "993"
+  HTTP_PORT: "80"
+  HTTP_BIND: "0.0.0.0"
+  HTTPS_PORT: "443"
+  HTTPS_BIND: "0.0.0.0"
+
+persistence:
+  enabled: true
+  storageClass: "longhorn"
+  mailData:
+    size: 100Gi
+  mysqlData:
+    size: 10Gi
+  redisData:
+    size: 2Gi
+  rspamdData:
+    size: 2Gi
+  postfixData:
+    size: 5Gi

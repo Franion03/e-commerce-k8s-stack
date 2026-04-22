@@ -1,0 +1,174 @@
+haproxy:
+  replicaCount: 2
+
+  service:
+    type: LoadBalancer
+    ports:
+      - name: http
+        port: 80
+        protocol: TCP
+      - name: https
+        port: 443
+        protocol: TCP
+      - name: stats
+        port: 8404
+        protocol: TCP
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+  config: |
+    global
+      log stdout format raw local0
+      maxconn 50000
+      tune.ssl.default-dh-param 2048
+      ssl-default-bind-ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+      ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+
+    defaults
+      log     global
+      mode    http
+      option  httplog
+      option  forwardfor
+      option  http-server-close
+      timeout connect 5s
+      timeout client  30s
+      timeout server  60s
+      errorfile 400 /usr/local/etc/haproxy/errors/400.http
+      errorfile 403 /usr/local/etc/haproxy/errors/403.http
+      errorfile 408 /usr/local/etc/haproxy/errors/408.http
+      errorfile 500 /usr/local/etc/haproxy/errors/500.http
+      errorfile 503 /usr/local/etc/haproxy/errors/503.http
+      errorfile 504 /usr/local/etc/haproxy/errors/504.http
+
+    frontend http-in
+      bind *:80
+      acl letsencrypt-acl path_beg /.well-known/acme-challenge/
+      use_backend letsencrypt-backend if letsencrypt-acl
+      redirect scheme https code 301 if !{ ssl_fc }
+
+    frontend https-in
+      bind *:443 ssl crt /etc/ssl/certs/kiruz.pem alpn h2,http/1.1
+      http-request set-header X-Forwarded-Proto https
+      http-request set-header CF-Connecting-IP %[req.hdr(CF-Connecting-IP)]
+      http-request capture req.hdr(Host) len 32
+
+      # ── Host ACLs ────────────────────────────────────────────────
+      acl is_api    hdr(host) -i api.kiruz.com
+      acl is_shop   hdr(host) -i shop.kiruz.com
+      acl is_erp    hdr(host) -i erp.kiruz.com
+      acl is_auth   hdr(host) -i auth.kiruz.com
+      acl is_dash   hdr(host) -i dashboard.kiruz.com
+
+      # ── Device detection (User-Agent) ────────────────────────────
+      # Matches phones only; tablets and PCs go to the desktop build.
+      acl is_mobile_ua hdr_sub(User-Agent) -i -f /etc/haproxy/mobile-ua.lst
+      # Explicitly exclude tablets so they get the desktop build
+      acl is_tablet_ua hdr_sub(User-Agent) -i iPad Tablet Kindle Silk
+
+      # ── Storefront routing ───────────────────────────────────────
+      # shop.kiruz.com + mobile phone → mobile backend
+      acl is_shop_mobile is_shop is_mobile_ua !is_tablet_ua
+      use_backend saleor-backend        if is_api
+      use_backend nextjs-mobile-backend if is_shop_mobile
+      use_backend nextjs-desktop-backend if is_shop !is_shop_mobile
+      use_backend odoo-backend          if is_erp
+      use_backend keycloak-backend      if is_auth
+      use_backend saleor-dashboard      if is_dash
+      default_backend nextjs-desktop-backend
+
+    # Mobile UA pattern list — kept in a separate file for easy updates.
+    # Mounted as a ConfigMap volume on the HAProxy pods.
+    # /etc/haproxy/mobile-ua.lst content (one token per line):
+    #   Mobile, Android, iPhone, BlackBerry, Opera Mini, IEMobile,
+    #   Windows Phone, webOS, Nokia, SamsungBrowser, MiuiBrowser
+
+    backend saleor-backend
+      balance leastconn
+      option httpchk GET /health/
+      server saleor-1 saleor.core-ecommerce.svc.cluster.local:8000 check inter 5s rise 2 fall 3
+
+    # ── Desktop / Tablet storefront (PC + tablet UAs) ────────────
+    backend nextjs-desktop-backend
+      balance roundrobin
+      option httpchk GET /api/health
+      http-request set-header X-Device-Type desktop
+      server nextjs-desktop-1 nextjs-storefront.core-ecommerce.svc.cluster.local:3000 check inter 5s
+
+    # ── Mobile storefront (phone UAs) ────────────────────────────
+    backend nextjs-mobile-backend
+      balance roundrobin
+      option httpchk GET /api/health
+      http-request set-header X-Device-Type mobile
+      server nextjs-mobile-1 nextjs-storefront-mobile.core-ecommerce.svc.cluster.local:3001 check inter 5s
+
+    backend odoo-backend
+      balance source
+      option httpchk GET /web/health
+      server odoo-1 odoo-wms.core-ecommerce.svc.cluster.local:8069 check inter 10s
+
+    backend keycloak-backend
+      balance leastconn
+      option httpchk GET /health/ready
+      server keycloak-1 keycloak.identity-security.svc.cluster.local:8080 check inter 5s
+
+    backend saleor-dashboard
+      balance roundrobin
+      server dashboard-1 saleor.core-ecommerce.svc.cluster.local:9000 check inter 5s
+
+    backend letsencrypt-backend
+      server letsencrypt cert-manager.cert-manager.svc.cluster.local:8089
+
+    listen stats
+      bind *:8404
+      stats enable
+      stats uri /stats
+      stats refresh 10s
+      stats auth admin:${HAPROXY_STATS_PASSWORD}
+
+  podAntiAffinity: "soft"
+
+  podDisruptionBudget:
+    create: true
+    minAvailable: 1
+
+  # ── Mobile UA pattern list (ConfigMap volume) ─────────────────
+  # HAProxy loads this file at startup via the -f flag reference in haproxy.cfg.
+  extraVolumes:
+    - name: mobile-ua-list
+      configMap:
+        name: haproxy-mobile-ua-list
+
+  extraVolumeMounts:
+    - name: mobile-ua-list
+      mountPath: /etc/haproxy/mobile-ua.lst
+      subPath: mobile-ua.lst
+      readOnly: true
+
+# ── ConfigMap: mobile User-Agent token list ──────────────────────
+# One token per line; HAProxy hdr_sub() does a case-insensitive substring match.
+mobileUAConfigMap:
+  enabled: true
+  name: haproxy-mobile-ua-list
+  tokens: |
+    Mobile
+    Android
+    iPhone
+    BlackBerry
+    Opera Mini
+    IEMobile
+    Windows Phone
+    webOS
+    Nokia
+    SamsungBrowser
+    MiuiBrowser
+    FBAN
+    FBAV
+    Twitter
+    Instagram
+    Snapchat

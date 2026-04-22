@@ -1,0 +1,38 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }
+  ],
+  "title": "Infrastructure Overview",
+  "uid":   "kiruz-infra",
+  "tags":  ["kiruz", "infrastructure"],
+  "refresh": "1m",
+  "panels": [
+    {
+      "id": 1, "title": "Node CPU Usage",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[2m])) * 100)", "legendFormat": "{{ instance }}" }]
+    },
+    {
+      "id": 2, "title": "Node Memory Available",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "node_memory_MemAvailable_bytes / 1024 / 1024 / 1024", "legendFormat": "{{ instance }} GB" }]
+    },
+    {
+      "id": 3, "title": "Network Bytes In/Out",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "rate(node_network_receive_bytes_total{device!~\"lo|veth.*\"}[2m])", "legendFormat": "{{ instance }} IN" },
+        { "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|veth.*\"}[2m]) * -1", "legendFormat": "{{ instance }} OUT" }
+      ]
+    },
+    {
+      "id": 4, "title": "PVC Usage",
+      "type": "table",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [{ "expr": "kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes * 100", "legendFormat": "{{ namespace }}/{{ persistentvolumeclaim }}" }]
+    }
+  ]
+}

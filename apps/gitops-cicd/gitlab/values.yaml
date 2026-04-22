@@ -1,0 +1,129 @@
+gitlab:
+  global:
+    hosts:
+      domain: kiruz.com
+      gitlab:
+        name: gitlab.kiruz.com
+      registry:
+        name: registry.kiruz.com
+    ingress:
+      class: "nginx"
+      configureCertmanager: false
+      tls:
+        secretName: gitlab-tls
+    certificates:
+      customCAs: []
+
+    # External PostgreSQL (Patroni)
+    psql:
+      host: postgresql-primary.storage.svc.cluster.local
+      port: 5432
+      database: gitlabhq_production
+      username: gitlab
+      password:
+        secret: gitlab-db-secret
+        key: password
+
+    # External Redis
+    redis:
+      host: redis-master.storage.svc.cluster.local
+      port: 6379
+      password:
+        secret: gitlab-redis-secret
+        key: password
+
+    # MinIO for object storage
+    minio:
+      enabled: false
+    appConfig:
+      object_store:
+        enabled: true
+        connection:
+          secret: gitlab-s3-secret
+          key: connection
+      lfs:
+        bucket: gitlab-lfs
+        connection:
+          secret: gitlab-s3-secret
+          key: connection
+      artifacts:
+        bucket: gitlab-artifacts
+      uploads:
+        bucket: gitlab-uploads
+      packages:
+        bucket: gitlab-packages
+      backups:
+        bucket: gitlab-backups
+
+    # Keycloak OMNIAUTH
+    omniauth:
+      enabled: true
+      autoSignInWithProvider: "openid_connect"
+      providers:
+        - secret: gitlab-keycloak-secret
+          key: provider
+
+    smtp:
+      enabled: true
+      address: "mailcow.marketing.svc.cluster.local"
+      port: 587
+      tls: false
+      starttls_auto: true
+
+  gitlab:
+    webservice:
+      replicaCount: 2
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1.5Gi
+        limits:
+          cpu: "2"
+          memory: 3Gi
+      ingress:
+        tls:
+          secretName: gitlab-tls
+
+    sidekiq:
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+
+    gitaly:
+      persistence:
+        storageClass: "longhorn"
+        size: 50Gi
+
+  # GitLab Runner config
+  gitlab-runner:
+    install: true
+    runners:
+      config: |
+        [[runners]]
+          name = "kiruz-k8s-runner"
+          executor = "kubernetes"
+          [runners.kubernetes]
+            namespace = "gitops-cicd"
+            image = "alpine:latest"
+            privileged = true
+            poll_timeout = 600
+            [[runners.kubernetes.volumes.empty_dir]]
+              name = "docker-certs"
+              mount_path = "/certs/client"
+              medium = "Memory"
+
+  # Disable bundled PostgreSQL/Redis/MinIO (using shared services)
+  postgresql:
+    install: false
+  redis:
+    install: false
+  minio:
+    enabled: false
+  certmanager:
+    install: false
+  nginx-ingress:
+    enabled: false
+  prometheus:
+    install: false

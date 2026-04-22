@@ -1,0 +1,87 @@
+# ──────────────────────────────────────────────────────────────────
+# Next.js Storefront — Mobile build
+# Served to phones (iOS / Android) detected by HAProxy User-Agent ACL.
+# PC and tablet traffic is routed to nextjs-storefront (desktop build).
+# ──────────────────────────────────────────────────────────────────
+
+replicaCount: 3
+
+image:
+  # Separate Docker image built with NEXT_PUBLIC_DEVICE_TARGET=mobile
+  # (different next.config.js: smaller image sizes, no heavy 3D widgets, AMP support)
+  repository: registry.gitlab.kiruz.com/kiruz/nextjs-storefront-mobile
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  # Use port 3001 to avoid colliding with the desktop storefront (3000)
+  port: 3001
+  containerPort: 3001
+
+# No external Ingress — HAProxy is the sole entry point for shop.kiruz.com.
+# An internal Ingress is created only for health-check access via cluster.
+ingress:
+  enabled: false
+
+# Internal ClusterIP reachable by HAProxy backend definition
+# HAProxy config routes User-Agent mobile traffic here directly via DNS.
+
+resources:
+  requests:
+    cpu: 150m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+env:
+  NEXT_PUBLIC_SALEOR_API_URL: "https://api.kiruz.com/graphql/"
+  NEXT_PUBLIC_STOREFRONT_URL: "https://shop.kiruz.com"
+  NEXT_PUBLIC_DEFAULT_CHANNEL: "default-channel"
+  NEXT_PUBLIC_CHECKOUT_APP_URL: "https://checkout.kiruz.com"
+  NEXT_PUBLIC_DEVICE_TARGET: "mobile"
+  # Mobile-specific env — smaller image variants, reduced JS bundle
+  NEXT_PUBLIC_IMAGE_MAX_WIDTH: "640"
+  NEXT_PUBLIC_ENABLE_PWA: "true"
+  PORT: "3001"
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 3001
+  initialDelaySeconds: 20
+  periodSeconds: 15
+
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: 3001
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [nextjs-storefront-mobile]
+          topologyKey: kubernetes.io/hostname

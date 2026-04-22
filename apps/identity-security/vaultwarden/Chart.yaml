@@ -1,0 +1,6 @@
+apiVersion: v2
+name: vaultwarden
+description: Self-hosted Bitwarden-compatible password manager
+type: application
+version: 1.0.0
+appVersion: "1.32"

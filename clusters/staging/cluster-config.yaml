@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: argocd
+data:
+  cluster_name: "kiruz-staging"
+  environment: "staging"
+  k8s_version: "1.30"
+  gitops_repo: "https://gitlab.kiruz.com/kiruz/e-commerceStack.git"
+  gitops_branch: "develop"

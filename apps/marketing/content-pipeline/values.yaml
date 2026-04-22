@@ -1,0 +1,91 @@
+# Content Pipeline: Saleor product webhook → n8n → Ollama (LLM) → Strapi CMS → Publish
+# Components: Ollama (LLM inference), Strapi (CMS), content-worker (custom Python/Node)
+
+ollama:
+  enabled: true
+  image:
+    repository: ollama/ollama
+    tag: "0.2.8"
+  # GPU node scheduling
+  nodeSelector:
+    accelerator: "gpu"
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+      nvidia.com/gpu: "1"
+    limits:
+      cpu: "8"
+      memory: 16Gi
+      nvidia.com/gpu: "1"
+  service:
+    type: ClusterIP
+    port: 11434
+  persistence:
+    enabled: true
+    storageClass: "longhorn"
+    size: 100Gi  # model weights
+  models:
+    - "llama3.1:8b"      # product descriptions
+    - "llava:7b"         # image understanding
+
+strapi:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: strapi/strapi
+    tag: "4"
+  service:
+    type: ClusterIP
+    port: 1337
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: cms.kiruz.com
+    tls:
+      - secretName: strapi-tls
+        hosts: [cms.kiruz.com]
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  env:
+    DATABASE_CLIENT: "postgres"
+    DATABASE_HOST: "postgresql-primary.storage.svc.cluster.local"
+    DATABASE_NAME: "strapi"
+    APP_KEYS: ""          # ESO injected
+    API_TOKEN_SALT: ""    # ESO injected
+    JWT_SECRET: ""        # ESO injected
+
+contentWorker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: registry.gitlab.kiruz.com/kiruz/content-worker
+    tag: "latest"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    SALEOR_API_URL: "http://saleor.core-ecommerce.svc.cluster.local:8000/graphql/"
+    OLLAMA_URL: "http://ollama.marketing.svc.cluster.local:11434"
+    STRAPI_URL: "http://strapi.marketing.svc.cluster.local:1337"
+    N8N_WEBHOOK_URL: "http://n8n.gitops-cicd.svc.cluster.local:5678/webhook/content-pipeline"
+    # META Commerce Manager + TikTok Shop
+    META_ACCESS_TOKEN: ""   # ESO injected
+    TIKTOK_ACCESS_TOKEN: "" # ESO injected
+    PUBLISH_TARGETS: "saleor,meta,tiktok"

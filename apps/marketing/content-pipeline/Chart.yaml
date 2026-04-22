@@ -1,0 +1,9 @@
+apiVersion: v2
+name: content-pipeline
+description: AI content generation pipeline (Saleor → Ollama → Strapi → Publish)
+type: application
+version: 1.0.0
+appVersion: "1.0"
+maintainers:
+  - name: platform-team
+    email: platform@kiruz.com

@@ -1,0 +1,91 @@
+# ──────────────────────────────────────────────────────────────────
+# cert-manager — values.yaml
+# Deploys cert-manager + két ClusterIssuers (Let's Encrypt
+# staging & production) using DNS-01 via Cloudflare and HTTP-01
+# via the nginx ingress class.
+# ──────────────────────────────────────────────────────────────────
+
+# ── Upstream cert-manager chart ───────────────────────────────────
+cert-manager:
+  # Install CRDs as part of the Helm release (recommended for GitOps).
+  # ArgoCD must use ServerSideApply=true so CRDs are not size-limited.
+  installCRDs: true
+
+  global:
+    leaderElection:
+      namespace: cert-manager
+
+  # Controller
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Webhook (required for certificate validation)
+  webhook:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+
+  # CA Injector (injects CA bundles into webhooks / API service objects)
+  cainjector:
+    enabled: true
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  # Prometheus metrics (scraped by the existing prometheus-stack)
+  prometheus:
+    enabled: true
+    servicemonitor:
+      enabled: true
+      prometheusInstance: kube-prometheus
+
+  # Pod disruption budget — keep at least one replica during node drain
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# ── ClusterIssuer settings ────────────────────────────────────────
+# Used by templates/cluster-issuers.yaml
+clusterIssuers:
+  # ACME account contact email (Let's Encrypt sends expiry warnings here)
+  email: "infra@kiruz.com"
+
+  # ── DNS-01 solver — Cloudflare ────────────────────────────────
+  # The Cloudflare API token must exist in the cert-manager namespace:
+  #
+  #   kubectl create secret generic cloudflare-api-token \
+  #     --from-literal=api-token=<TOKEN> \
+  #     --namespace cert-manager
+  #
+  # The token needs Zone:Read + DNS:Edit permissions on kiruz.com.
+  # Re-use the same token value that ExternalDNS uses (infra namespace
+  # cloudflare-api-token), but as a separate Secret object in this namespace.
+  cloudflare:
+    apiTokenSecretName: "cloudflare-api-token"
+    apiTokenSecretKey: "api-token"
+    # DNS propagation timeout — Cloudflare propagates near-instantly,
+    # but 120 s gives ample headroom.
+    dnsPropagationSeconds: 120
+
+  # ── HTTP-01 solver — nginx ingress ───────────────────────────
+  # cert-manager creates a temporary Pod + Service + Ingress in the
+  # certificate's namespace; nginx routes the ACME challenge token.
+  # HAProxy already forwards /.well-known/acme-challenge/ → nginx.
+  http01:
+    ingressClass: "nginx"

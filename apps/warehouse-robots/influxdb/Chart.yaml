@@ -1,0 +1,10 @@
+apiVersion: v2
+name: influxdb
+description: InfluxDB v2 for robot telemetry time-series data
+type: application
+version: 1.0.0
+appVersion: "2.7"
+dependencies:
+  - name: influxdb2
+    version: "2.1.2"
+    repository: "https://helm.influxdata.com"

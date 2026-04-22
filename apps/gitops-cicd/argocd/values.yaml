@@ -1,0 +1,102 @@
+argo-cd:
+  global:
+    domain: argocd.kiruz.com
+
+  server:
+    ingress:
+      enabled: true
+      ingressClassName: "nginx"
+      annotations:
+        cert-manager.io/cluster-issuer: "letsencrypt-prod"
+        nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      hostname: argocd.kiruz.com
+      tls: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  controller:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+
+  repoServer:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    # Helm plugins
+    volumes:
+      - name: helm-secrets-private-keys
+        secret:
+          secretName: helm-secrets-private-keys
+
+  applicationSet:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  # Dex for SSO via Keycloak
+  dex:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  configs:
+    cm:
+      # Keycloak OIDC
+      oidc.config: |
+        name: Keycloak
+        issuer: https://auth.kiruz.com/realms/kiruz
+        clientID: argocd
+        clientSecret: $oidc.keycloak.clientSecret
+        requestedScopes: ["openid", "profile", "email", "groups"]
+        requestedIDTokenClaims:
+          groups:
+            essential: true
+      admin.enabled: "false"
+      resource.customizations.health.argoproj.io_Application: |
+        hs = {}
+        hs.status = "Progressing"
+        hs.message = ""
+        if obj.status ~= nil then
+          if obj.status.health ~= nil then
+            hs.status = obj.status.health.status
+            if obj.status.health.message ~= nil then
+              hs.message = obj.status.health.message
+            end
+          end
+        end
+        return hs
+
+    rbac:
+      policy.csv: |
+        p, role:readonly, applications, get, */*, allow
+        g, kiruz:platform-team, role:admin
+        g, kiruz:developers, role:readonly
+      policy.default: role:readonly
+
+    repositories:
+      - type: git
+        url: https://gitlab.kiruz.com/kiruz/e-commerceStack.git
+        name: kiruz-gitops
+        passwordSecret:
+          name: argocd-gitlab-secret
+          key: password
+        usernameSecret:
+          name: argocd-gitlab-secret
+          key: username

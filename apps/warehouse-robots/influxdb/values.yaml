@@ -1,0 +1,70 @@
+influxdb2:
+  image:
+    repository: influxdb
+    tag: "2.7-alpine"
+
+  adminUser:
+    organization: "kiruz"
+    bucket: "robots"
+    existingSecret: influxdb-admin-secret
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+  persistence:
+    enabled: true
+    storageClass: longhorn
+    size: 50Gi
+
+  ingress:
+    enabled: false   # internal only
+
+  service:
+    type: ClusterIP
+    port: 8086
+
+  # MQTT-to-InfluxDB bridge (Telegraf sidecar)
+  telegraf:
+    enabled: true
+    config: |
+      [agent]
+        interval = "10s"
+        round_interval = true
+        metric_batch_size = 1000
+        metric_buffer_limit = 10000
+
+      [[inputs.mqtt_consumer]]
+        servers = ["tcp://mosquitto.warehouse-robots.svc.cluster.local:1883"]
+        topics = ["robots/+/telemetry"]
+        username = "influxdb-subscriber"
+        password = "${MQTT_PASSWORD}"
+        data_format = "json"
+        json_time_key = "timestamp"
+        json_time_format = "unix_ms"
+        tag_keys = ["robot_id", "zone", "model"]
+
+      [[outputs.influxdb_v2]]
+        urls = ["http://influxdb.warehouse-robots.svc.cluster.local:8086"]
+        token = "${INFLUXDB_TOKEN}"
+        organization = "kiruz"
+        bucket = "robots"
+
+  # Retention policy: raw data 7d, downsampled 90d
+  retentionPolicies:
+    raw:
+      duration: "7d"
+      bucketName: "robots"
+    hourly:
+      duration: "90d"
+      bucketName: "robots-hourly"
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: monitoring
